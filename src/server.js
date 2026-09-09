@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 
+const { getSecret } = require('./secrets');
 const { pool, initDb } = require('./db');
 
 const app = express();
@@ -19,12 +20,13 @@ const app = express();
 app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = getSecret('JWT-SECRET');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 if (!JWT_SECRET) {
   console.error(
-    'JWT_SECRET is not set. Copy .env.example to .env and set a long random value before starting the server.'
+    'JWT_SECRET is not set. Set it as a JWT_SECRET environment variable (Render, local dev) ' +
+    'or as a mounted JWT-SECRET Key Vault secret (AKS).'
   );
   process.exit(1);
 }

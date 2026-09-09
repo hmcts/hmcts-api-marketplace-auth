@@ -28,8 +28,5 @@ nodejs:
   #        - ENTRA-CLIENT-ID
   #        - ENTRA-CLIENT-SECRET
 
-  # /health does not exist in src/server.js yet - every current route needs a
-  # signed-in token (401) or a body (400), neither of which a health check can
-  # supply. Needs adding: an unauthenticated GET returning 200.
-  readinessPath: /health
-  livenessPath: /health
+  readinessPath: /api/health
+  livenessPath: /api/health

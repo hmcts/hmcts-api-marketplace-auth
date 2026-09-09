@@ -1,18 +1,24 @@
 const { Pool } = require('pg');
+const { getSecret } = require('./secrets');
 
-if (!process.env.DATABASE_URL) {
+const DATABASE_URL = getSecret('DATABASE-URL');
+
+if (!DATABASE_URL) {
   console.error(
-    'DATABASE_URL is not set. Add it in your hosting provider\'s environment variables ' +
-    '(e.g. Render: create a Postgres instance, then copy its "Internal Database URL" here).'
+    'DATABASE-URL is not set. Set it as a DATABASE_URL environment variable (Render, local ' +
+    'dev) or as a mounted DATABASE-URL Key Vault secret (AKS).'
   );
   process.exit(1);
 }
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DATABASE_URL,
   // Render's managed Postgres requires SSL, but uses a certificate that
   // Node won't automatically trust as a public CA - this is the standard,
-  // documented way to connect to it.
+  // documented way to connect to it. The Azure Database for PostgreSQL
+  // Flexible Server infrastructure/ provisions also requires SSL
+  // (sslmode=require is baked into the DATABASE-URL Terraform writes), so
+  // this setting is correct for both.
   ssl: { rejectUnauthorized: false },
 });
 

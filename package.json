@@ -8,6 +8,8 @@
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
+    "@hmcts/properties-volume": "^1.4.1",
+    "config": "^3.3.9",
     "pg": "^8.12.0",
     "nodemailer": "^6.9.14",
     "bcryptjs": "^2.4.3",
