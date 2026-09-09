@@ -1,0 +1,11 @@
+{
+  "secrets": {
+    "amp": {
+      "JWT-SECRET": "JWT_SECRET",
+      "DATABASE-URL": "DATABASE_URL",
+      "ENTRA-TENANT-ID": "ENTRA_TENANT_ID",
+      "ENTRA-CLIENT-ID": "ENTRA_CLIENT_ID",
+      "ENTRA-CLIENT-SECRET": "ENTRA_CLIENT_SECRET"
+    }
+  }
+}
