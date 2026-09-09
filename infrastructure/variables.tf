@@ -35,12 +35,8 @@ variable "pgsql_create_mode" {
   default     = "Default"
 }
 
-variable "product_group_object_id" {
-  description = "Object ID of the AAD group for the product team (DTS AMp Developers), granted Key Vault access by cnp-module-key-vault. TODO: fill in with the real group object ID before this can apply - not yet known in this environment."
-  type        = string
-}
-
 variable "aks_subscription_id" {
-  description = "Subscription ID of the AKS/CFT vnet the Postgres Flexible Server injects into. Provided automatically by the Jenkins library in a real pipeline run; set explicitly here for local plan/apply. TODO: not yet known in this environment - get the correct sandbox subscription ID from Platform Operations rather than guessing one."
+  description = "Subscription ID of the AKS/CFT vnet the Postgres Flexible Server injects into. Provided automatically by the Jenkins library in a real pipeline run; the default below is DTS-SPS-SBOX, confirmed against hmcts/shared-platform-services-infra's own sbox.tfvars (cross_tenant_peering.cnp_subscription_id) - the same subscription that hosts rg-sps-platform-sbox and rg-sps-platform-extid-sbox for this exact product."
   type        = string
+  default     = "bd2864ed-4f3e-45ed-9c6a-8d179674bab1"
 }

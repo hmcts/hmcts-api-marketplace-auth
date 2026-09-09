@@ -95,24 +95,27 @@ front-end files to the server's real deployed URL.
 
 ## Infrastructure (AKS / CNP)
 
-`infrastructure/` provisions this service's Postgres Flexible Server and its
-`amp-sbox` Key Vault via Terraform, following
+`infrastructure/` provisions this service's Postgres Flexible Server via
+Terraform, following
 [HMCTS's CNP onboarding process](https://hmcts.github.io/cloud-native-platform/new-component/).
-Terraform populates `DATABASE-URL` in the vault automatically from the
-Postgres module's outputs. Two things it deliberately does **not** set,
-which need adding by hand via the Azure CLI once the vault exists (per the
-CNP convention of writing secrets via CLI, not the Portal):
+It does **not** create its own Key Vault - `hmcts/shared-platform-services-infra`
+already provisions `kvspsplatformsbox` (in `rg-sps-platform-sbox`) as the one
+shared vault for every component of this product, with `DTS AMp Developers`
+already granted access there. Terraform here writes `DATABASE-URL` into that
+existing vault, composed from the Postgres module's outputs. Two things it
+deliberately does **not** set, which need adding by hand via the Azure CLI
+(per the CNP convention of writing secrets via CLI, not the Portal):
 
 - `JWT_SECRET` — generate a random value once:
   ```bash
-  az keyvault secret set --vault-name amp-sbox --name JWT-SECRET \
+  az keyvault secret set --vault-name kvspsplatformsbox --name JWT-SECRET \
     --value "$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")"
   ```
 - `ENTRA-TENANT-ID`, `ENTRA-CLIENT-ID`, `ENTRA-CLIENT-SECRET` — copied from
   the `hmcts-api-marketplace-sbox-app-registrar` app registration's own
   secrets in the `kvspsextidsbox` vault (see `hmcts/external-entra-id`) —
-  a different vault, since that app registration is platform identity
-  tooling, not this product's own infrastructure.
+  a different vault from `kvspsplatformsbox`, since that app registration is
+  platform identity tooling, not this product's own infrastructure.
 
 The AKS pod reads all of these as mounted files via the Helm chart's
 `nodejs.keyVaults` config (`charts/amp-auth/values.yaml`), not as plain
