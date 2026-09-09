@@ -8,18 +8,18 @@ nodejs:
     NODE_ENV: production
     FRONTEND_ORIGIN: https://hmcts.github.io
 
-  # Uncomment once infrastructure/ has provisioned the amp-{env} Key Vault
-  # (cnp-module-key-vault) and populated these secrets - see
-  # terraform-module-postgresql-flexible for DATABASE_URL and the
-  # external-entra-id sbox app registrar for the ENTRA_* values.
+  # Uncomment once infrastructure/ has applied (provisioning the amp-{env}
+  # Key Vault) and README.md's "Infrastructure (AKS / CNP)" steps have
+  # populated these secrets - Key Vault secret names are hyphenated, not
+  # underscored (Azure doesn't allow underscores in secret names).
   #  keyVaults:
   #    amp:
   #      secrets:
-  #        - JWT_SECRET
-  #        - DATABASE_URL
-  #        - ENTRA_TENANT_ID
-  #        - ENTRA_CLIENT_ID
-  #        - ENTRA_CLIENT_SECRET
+  #        - JWT-SECRET
+  #        - DATABASE-URL
+  #        - ENTRA-TENANT-ID
+  #        - ENTRA-CLIENT-ID
+  #        - ENTRA-CLIENT-SECRET
 
   # /health does not exist in src/server.js yet - every current route needs a
   # signed-in token (401) or a body (400), neither of which a health check can

@@ -93,6 +93,33 @@ Whichever you choose, you'll set the same environment variables from
 and update `FRONTEND_ORIGIN` to your real site's URL, and `API_BASE` in the
 front-end files to the server's real deployed URL.
 
+## Infrastructure (AKS / CNP)
+
+`infrastructure/` provisions this service's Postgres Flexible Server and its
+`amp-sbox` Key Vault via Terraform, following
+[HMCTS's CNP onboarding process](https://hmcts.github.io/cloud-native-platform/new-component/).
+Terraform populates `DATABASE-URL` in the vault automatically from the
+Postgres module's outputs. Two things it deliberately does **not** set,
+which need adding by hand via the Azure CLI once the vault exists (per the
+CNP convention of writing secrets via CLI, not the Portal):
+
+- `JWT_SECRET` — generate a random value once:
+  ```bash
+  az keyvault secret set --vault-name amp-sbox --name JWT-SECRET \
+    --value "$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")"
+  ```
+- `ENTRA-TENANT-ID`, `ENTRA-CLIENT-ID`, `ENTRA-CLIENT-SECRET` — copied from
+  the `hmcts-api-marketplace-sbox-app-registrar` app registration's own
+  secrets in the `kvspsextidsbox` vault (see `hmcts/external-entra-id`) —
+  a different vault, since that app registration is platform identity
+  tooling, not this product's own infrastructure.
+
+The AKS pod reads all of these as mounted files via the Helm chart's
+`nodejs.keyVaults` config (`charts/amp-auth/values.yaml`), not as plain
+environment variables the way the Render deployment does today - `src/`
+will need updating to read them that way (via `properties-volume-nodejs`)
+before this is live.
+
 ## Security notes for a real deployment
 
 This covers the basics (password hashing, rate limiting on login attempts,
