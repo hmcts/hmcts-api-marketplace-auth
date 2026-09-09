@@ -1,0 +1,10 @@
+apiVersion: v2
+appVersion: '1.0'
+description: A Helm chart for the amp-auth App
+name: amp-auth
+home: https://github.com/hmcts/hmcts-api-marketplace-auth
+version: 0.0.1
+dependencies:
+  - name: nodejs
+    version: 3.2.0
+    repository: 'oci://hmctsprod.azurecr.io/helm'

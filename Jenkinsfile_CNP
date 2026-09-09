@@ -1,0 +1,10 @@
+#!groovy
+
+@Library("Infrastructure")
+
+def type = "nodejs"
+def product = "amp"
+def component = "auth"
+
+withPipeline(type, product, component) {
+}

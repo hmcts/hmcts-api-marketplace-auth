@@ -1,0 +1,28 @@
+nodejs:
+  applicationPort: 3001
+  aadIdentityName: amp
+  ingressHost: amp-auth.{{ .Values.global.environment }}.platform.hmcts.net
+  image: 'hmctsprod.azurecr.io/amp/auth:latest'
+
+  environment:
+    NODE_ENV: production
+    FRONTEND_ORIGIN: https://hmcts.github.io
+
+  # Uncomment once infrastructure/ has provisioned the amp-{env} Key Vault
+  # (cnp-module-key-vault) and populated these secrets - see
+  # terraform-module-postgresql-flexible for DATABASE_URL and the
+  # external-entra-id sbox app registrar for the ENTRA_* values.
+  #  keyVaults:
+  #    amp:
+  #      secrets:
+  #        - JWT_SECRET
+  #        - DATABASE_URL
+  #        - ENTRA_TENANT_ID
+  #        - ENTRA_CLIENT_ID
+  #        - ENTRA_CLIENT_SECRET
+
+  # /health does not exist in src/server.js yet - every current route needs a
+  # signed-in token (401) or a body (400), neither of which a health check can
+  # supply. Needs adding: an unauthenticated GET returning 200.
+  readinessPath: /health
+  livenessPath: /health
