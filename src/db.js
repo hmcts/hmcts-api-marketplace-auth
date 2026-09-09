@@ -54,9 +54,27 @@ async function initDb() {
       callback_url TEXT,
       custom_attributes JSONB NOT NULL DEFAULT '{}',
       connected_apis JSONB NOT NULL DEFAULT '[]',
+      entra_app_id TEXT,
+      entra_object_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (owner_type, owner_id, name, environment)
     );
+  `);
+
+  // entra_app_id is the real OAuth client ID Microsoft Graph issues when
+  // creating a sandbox application's app registration (see src/entra.js) -
+  // null for anything created before this existed, or for the
+  // development/integration-test/production applications that still get a
+  // self-issued amp_-prefixed key instead. entra_object_id is Graph's own
+  // object ID for that same registration, needed to address it in later
+  // Graph calls (rotate/delete) - a different value from entra_app_id.
+  // ADD COLUMN IF NOT EXISTS is directly idempotent in Postgres, unlike the
+  // constraint migration below which needs the DO $$ block.
+  await pool.query(`
+    ALTER TABLE applications ADD COLUMN IF NOT EXISTS entra_app_id TEXT;
+  `);
+  await pool.query(`
+    ALTER TABLE applications ADD COLUMN IF NOT EXISTS entra_object_id TEXT;
   `);
 
   // Migration for databases created before the uniqueness constraint above
@@ -111,9 +129,18 @@ async function initDb() {
       application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
       key_hash TEXT NOT NULL,
       key_preview TEXT NOT NULL,
+      entra_key_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       revoked_at TIMESTAMPTZ
     );
+  `);
+
+  // entra_key_id is Graph's ID for a specific password credential on a
+  // sandbox application's app registration (see src/entra.js) - needed to
+  // remove that exact secret later, since one app registration can hold
+  // several. Null for anything that isn't a real Entra-backed secret.
+  await pool.query(`
+    ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS entra_key_id TEXT;
   `);
 
   // Submissions from the three "ask the marketplace team for something"

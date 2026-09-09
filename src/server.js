@@ -10,6 +10,7 @@ const nodemailer = require('nodemailer');
 
 const { getSecret } = require('./secrets');
 const { pool, initDb } = require('./db');
+const entra = require('./entra');
 
 const app = express();
 
@@ -218,6 +219,11 @@ const ENVIRONMENTS = ['sandbox', 'development', 'integration-test', 'production'
 function toPublicApplication(row) {
   return {
     id: row.id,
+    // The real OAuth client ID for sandbox applications with a genuine
+    // Entra app registration (see src/entra.js); falls back to our own
+    // internal id for anything that doesn't have one, matching the value
+    // this always used to show before entra_app_id existed.
+    clientId: row.entra_app_id || row.id,
     name: row.name,
     description: row.description,
     environment: row.environment,
@@ -243,13 +249,19 @@ function newApiKey() {
   return 'amp_' + crypto.randomBytes(24).toString('hex');
 }
 
-async function issueApiKey(applicationId) {
-  const rawKey = newApiKey();
+// rawKey/entraKeyId let a caller record a real Entra-issued secret (see
+// src/entra.js) under the same api_keys bookkeeping the client-secrets page
+// already lists, generates against and deletes from - self-issued
+// amp_-prefixed keys and real Entra secrets otherwise look identical to the
+// rest of this file. Only revoke (below) needs to tell them apart, via
+// entra_key_id being set or not.
+async function issueApiKey(applicationId, rawKey, entraKeyId) {
+  rawKey = rawKey || newApiKey();
   const keyHash = await bcrypt.hash(rawKey, 12);
   const keyId = crypto.randomUUID();
   await pool.query(
-    `INSERT INTO api_keys (id, application_id, key_hash, key_preview) VALUES ($1, $2, $3, $4)`,
-    [keyId, applicationId, keyHash, rawKey.slice(-4)]
+    `INSERT INTO api_keys (id, application_id, key_hash, key_preview, entra_key_id) VALUES ($1, $2, $3, $4, $5)`,
+    [keyId, applicationId, keyHash, rawKey.slice(-4), entraKeyId || null]
   );
   return { id: keyId, rawKey };
 }
@@ -353,9 +365,40 @@ app.post('/api/applications', requireAuth, async (req, res) => {
       [applicationId, trimmedName, description || null, environment, req.user.sub]
     );
 
-    const { rawKey } = await issueApiKey(applicationId);
+    // Sandbox only, and only once the sbox app registrar's credentials are
+    // actually configured (see src/entra.js) - every other environment, and
+    // sandbox itself if Entra isn't set up yet, keeps the existing
+    // self-issued amp_-prefixed key so this degrades to today's behaviour
+    // rather than failing outright.
+    let apiKey;
+    if (environment === 'sandbox' && entra.isConfigured()) {
+      let registration;
+      try {
+        registration = await entra.createAppRegistration(`amp-sandbox-${applicationId}`);
+      } catch (err) {
+        // The application row already exists at this point - roll it back
+        // rather than leaving an application with no usable credentials at
+        // all, which would be worse than the create simply failing.
+        console.error('Entra app registration error:', err);
+        await pool.query('DELETE FROM applications WHERE id = $1', [applicationId]);
+        return res.status(502).json({
+          error: 'Could not create your application credentials with Microsoft Entra. Please try again.',
+        });
+      }
 
-    res.status(201).json({ application: toPublicApplication(created.rows[0]), apiKey: rawKey });
+      await pool.query(
+        'UPDATE applications SET entra_app_id = $2, entra_object_id = $3 WHERE id = $1',
+        [applicationId, registration.appId, registration.objectId]
+      );
+      created.rows[0].entra_app_id = registration.appId;
+      created.rows[0].entra_object_id = registration.objectId;
+      await issueApiKey(applicationId, registration.secretText, registration.keyId);
+      apiKey = registration.secretText;
+    } else {
+      apiKey = (await issueApiKey(applicationId)).rawKey;
+    }
+
+    res.status(201).json({ application: toPublicApplication(created.rows[0]), apiKey });
   } catch (err) {
     console.error('Create application error:', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -446,7 +489,14 @@ app.post('/api/applications/:id/api-keys', requireAuth, async (req, res) => {
     const application = await loadAccessibleApplication(req, res, 'administrator');
     if (!application) return;
 
-    const { id: keyId, rawKey } = await issueApiKey(application.id);
+    let keyId, rawKey;
+    if (application.entra_object_id) {
+      const password = await entra.addPassword(application.entra_object_id);
+      ({ id: keyId } = await issueApiKey(application.id, password.secretText, password.keyId));
+      rawKey = password.secretText;
+    } else {
+      ({ id: keyId, rawKey } = await issueApiKey(application.id));
+    }
     res.status(201).json({ id: keyId, apiKey: rawKey });
   } catch (err) {
     console.error('Create API key error:', err);
@@ -458,6 +508,19 @@ app.delete('/api/applications/:id/api-keys/:keyId', requireAuth, async (req, res
   try {
     const application = await loadAccessibleApplication(req, res, 'administrator');
     if (!application) return;
+
+    const existing = await pool.query(
+      `SELECT entra_key_id FROM api_keys WHERE id = $1 AND application_id = $2 AND revoked_at IS NULL`,
+      [req.params.keyId, application.id]
+    );
+
+    // A real Entra secret must actually be removed from the app
+    // registration - marking our own row revoked_at is not enough on its
+    // own, or the credential would keep working against a real token
+    // request even though our UI shows it as deleted.
+    if (existing.rows[0] && existing.rows[0].entra_key_id) {
+      await entra.removePassword(application.entra_object_id, existing.rows[0].entra_key_id);
+    }
 
     await pool.query(
       `UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND application_id = $2 AND revoked_at IS NULL`,
