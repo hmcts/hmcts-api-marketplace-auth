@@ -45,27 +45,29 @@ module "postgresql" {
   common_tags = var.common_tags
 }
 
-# Product-level vault, shared with any other amp-* component - matches the
-# {product}-{env} naming convention documented at
-# hmcts.github.io/cloud-native-platform/new-component/secrets-management.html.
-module "key-vault" {
-  source              = "git@github.com:hmcts/cnp-module-key-vault?ref=master"
-  product             = var.product
-  env                 = var.env
-  tenant_id           = var.tenant_id
-  object_id           = var.jenkins_AAD_objectId
-  resource_group_name = azurerm_resource_group.rg.name
-
-  product_group_name       = "DTS AMp Developers"
-  product_group_object_id  = var.product_group_object_id
-  common_tags              = var.common_tags
+# Not a new vault. hmcts/shared-platform-services-infra already provisions
+# kvspsplatformsbox (in rg-sps-platform-sbox) as the one shared Key Vault for
+# every component of this product, with DTS AMp Developers already granted
+# access there - a second, component-owned vault here would just duplicate
+# that. See that repo's components/core/main.tf for how it's set up.
+#
+# TODO: confirm with Platform Operations that whatever identity runs this
+# repo's own Jenkins pipeline actually has a data-plane role (Key Vault
+# Secrets Officer or Administrator) on kvspsplatformsbox, not just the
+# Contributor/Reader role shared-platform-services-infra's own
+# amp_role_assignment grants at the resource group scope - Contributor does
+# not include Key Vault data-plane actions under RBAC authorization, so this
+# secret write may still fail at apply time until that's confirmed/granted.
+data "azurerm_key_vault" "platform" {
+  name                = "kvspsplatformsbox"
+  resource_group_name = "rg-sps-platform-sbox"
 }
 
 resource "azurerm_key_vault_secret" "database_url" {
   name  = "DATABASE-URL"
   value = "postgresql://${module.postgresql.username}:${module.postgresql.password}@${module.postgresql.fqdn}:5432/amp_auth?sslmode=require"
 
-  key_vault_id = module.key-vault.key_vault_id
+  key_vault_id = data.azurerm_key_vault.platform.id
 }
 
 # JWT_SECRET, ENTRA_TENANT_ID, ENTRA_CLIENT_ID and ENTRA_CLIENT_SECRET are

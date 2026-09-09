@@ -8,10 +8,17 @@ nodejs:
     NODE_ENV: production
     FRONTEND_ORIGIN: https://hmcts.github.io
 
-  # Uncomment once infrastructure/ has applied (provisioning the amp-{env}
-  # Key Vault) and README.md's "Infrastructure (AKS / CNP)" steps have
-  # populated these secrets - Key Vault secret names are hyphenated, not
-  # underscored (Azure doesn't allow underscores in secret names).
+  # Uncomment once README.md's "Infrastructure (AKS / CNP)" steps have
+  # populated these secrets in kvspsplatformsbox (shared-platform-services-infra,
+  # not this repo, owns that vault). Key Vault secret names are hyphenated,
+  # not underscored (Azure doesn't allow underscores in secret names).
+  #
+  # TODO: `amp` below is a guess at the keyVaults grouping key chart-nodejs
+  # expects, following the aadIdentityName above - couldn't verify the exact
+  # key or whether it needs to name the vault explicitly (kvspsplatformsbox
+  # rather than the amp-sbox its own {identity}-{env} convention would imply)
+  # without pulling the private chart-nodejs source. Check against
+  # oci://hmctsprod.azurecr.io/helm/nodejs before relying on this.
   #  keyVaults:
   #    amp:
   #      secrets:
