@@ -7,10 +7,6 @@ metadata:
   annotations:
     # This should match folder-name/job-name in Jenkins.
     jenkins.io/job-full-name: cft:HMCTS_amp/hmcts-api-marketplace-auth
-    # TODO: this repo currently lives at github.com/ZaheerIqbal-HMCTS/hmcts-api-marketplace-auth,
-    # a personal account. CNP repo conventions (team-based access, Jenkins org
-    # scan, cnp-jenkins-config allowlisting) all assume a repo under the hmcts
-    # GitHub org - update this once the repo has moved there.
     github.com/project-slug: 'hmcts/hmcts-api-marketplace-auth'
   tags:
     - nodejs
