@@ -7,4 +7,5 @@ def product = "amp"
 def component = "auth"
 
 withPipeline(type, product, component) {
+  alwaysTerraformPlanOnPR()
 }
