@@ -143,6 +143,41 @@ async function initDb() {
     ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS entra_key_id TEXT;
   `);
 
+  // Pre-provisioned Entra app registrations - created in bulk by the
+  // external-entra-id Terraform pipeline (tenants/sbox/config/apps.yaml),
+  // never by this app calling Microsoft Graph at request time (see
+  // src/entraPool.js). A row starts unassigned (assigned_application_id
+  // NULL) and is handed out atomically to a sandbox application at creation
+  // time. key_vault_secret_name is the name Terraform gave the secret in
+  // the shared Entra identity vault (kvspsextidsbox) - the actual secret
+  // value is fetched from Key Vault on demand, never stored here.
+  // needs_rotation is what stops a released row being handed to a
+  // *different* consumer while still holding the previous consumer's
+  // secret value: releasing sets it true, and allocate() only ever picks
+  // rows where it's false. A row only becomes available again once
+  // something has actually rotated its Key Vault secret (see the doc
+  // comment on release() in src/entraPool.js for what that "something" is
+  // today) - without this, a deleted or rotated-away application's old
+  // Client ID + Secret would keep working for whoever gets that row next.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS entra_app_pool (
+      id SERIAL PRIMARY KEY,
+      entra_app_id TEXT NOT NULL UNIQUE,
+      entra_object_id TEXT NOT NULL,
+      key_vault_secret_name TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'sandbox',
+      assigned_application_id UUID REFERENCES applications(id) ON DELETE SET NULL,
+      assigned_at TIMESTAMPTZ,
+      needs_rotation BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS entra_app_pool_available_idx
+      ON entra_app_pool (environment)
+      WHERE assigned_application_id IS NULL AND needs_rotation = false;
+  `);
+
   // Submissions from the three "ask the marketplace team for something"
   // forms - request API access, publish an API, request a new API - so a
   // signed-in user can see their own submission history on their account
