@@ -10,7 +10,7 @@ const nodemailer = require('nodemailer');
 
 const { getSecret } = require('./secrets');
 const { pool, initDb } = require('./db');
-const entra = require('./entra');
+const entraPool = require('./entraPool');
 
 const app = express();
 
@@ -219,10 +219,11 @@ const ENVIRONMENTS = ['sandbox', 'development', 'integration-test', 'production'
 function toPublicApplication(row) {
   return {
     id: row.id,
-    // The real OAuth client ID for sandbox applications with a genuine
-    // Entra app registration (see src/entra.js); falls back to our own
-    // internal id for anything that doesn't have one, matching the value
-    // this always used to show before entra_app_id existed.
+    // The real OAuth client ID for sandbox applications allocated a
+    // pre-provisioned Entra app registration (see src/entraPool.js); falls
+    // back to our own internal id for anything that doesn't have one,
+    // matching the value this always used to show before entra_app_id
+    // existed.
     clientId: row.entra_app_id || row.id,
     name: row.name,
     description: row.description,
@@ -365,24 +366,27 @@ app.post('/api/applications', requireAuth, async (req, res) => {
       [applicationId, trimmedName, description || null, environment, req.user.sub]
     );
 
-    // Sandbox only, and only once the sbox app registrar's credentials are
-    // actually configured (see src/entra.js) - every other environment, and
-    // sandbox itself if Entra isn't set up yet, keeps the existing
-    // self-issued amp_-prefixed key so this degrades to today's behaviour
-    // rather than failing outright.
+    // Sandbox only, and only once the pool is actually configured (see
+    // src/entraPool.js) - every other environment, and sandbox itself if
+    // the pool isn't set up yet, keeps the existing self-issued
+    // amp_-prefixed key so this degrades to today's behaviour rather than
+    // failing outright. Allocation just claims a pre-provisioned row and
+    // reads its secret from Key Vault - there is no live call to Microsoft
+    // Graph anywhere in this path, matching HMRC Developer Hub's model:
+    // registering an application is instant.
     let apiKey;
-    if (environment === 'sandbox' && entra.isConfigured()) {
+    if (environment === 'sandbox' && entraPool.isConfigured()) {
       let registration;
       try {
-        registration = await entra.createAppRegistration(`amp-sandbox-${applicationId}`);
+        registration = await entraPool.allocate(applicationId, environment);
       } catch (err) {
         // The application row already exists at this point - roll it back
         // rather than leaving an application with no usable credentials at
         // all, which would be worse than the create simply failing.
-        console.error('Entra app registration error:', err);
+        console.error('Entra pool allocation error:', err);
         await pool.query('DELETE FROM applications WHERE id = $1', [applicationId]);
         return res.status(502).json({
-          error: 'Could not create your application credentials with Microsoft Entra. Please try again.',
+          error: 'Could not allocate your application credentials. Please try again.',
         });
       }
 
@@ -392,7 +396,7 @@ app.post('/api/applications', requireAuth, async (req, res) => {
       );
       created.rows[0].entra_app_id = registration.appId;
       created.rows[0].entra_object_id = registration.objectId;
-      await issueApiKey(applicationId, registration.secretText, registration.keyId);
+      await issueApiKey(applicationId, registration.secretText, null);
       apiKey = registration.secretText;
     } else {
       apiKey = (await issueApiKey(applicationId)).rawKey;
@@ -470,9 +474,19 @@ app.delete('/api/applications/:id', requireAuth, async (req, res) => {
     const application = await loadAccessibleApplication(req, res, 'owner');
     if (!application) return;
 
+    // Must run before the delete below, not after: entra_app_pool's FK is
+    // ON DELETE SET NULL, so deleting the application first would free the
+    // pool row with needs_rotation still false - immediately reusable by
+    // the next application, while this application's owner still knows its
+    // Client Secret. release() flags it needs_rotation as well as clearing
+    // the assignment, closing that gap.
+    if (application.entra_object_id) {
+      await entraPool.release(application.id);
+    }
+
     // api_keys and application_team_members cascade on application_id (see
     // db.js); connected_apis and custom_attributes are columns on this same
-    // row, so a single delete removes everything.
+    // row, so a single delete removes everything else.
     await pool.query('DELETE FROM applications WHERE id = $1', [application.id]);
 
     res.status(204).end();
@@ -489,11 +503,45 @@ app.post('/api/applications/:id/api-keys', requireAuth, async (req, res) => {
     const application = await loadAccessibleApplication(req, res, 'administrator');
     if (!application) return;
 
+    // A pool-backed application holds exactly one secret at a time (unlike
+    // the old per-request Graph model, which could add several passwords to
+    // the same app registration) - "generate another" releases this
+    // application's current pool row and allocates a fresh one, which also
+    // gives the consumer a new Client ID, not just a new secret. This is
+    // disclosed on the client-secrets page.
+    //
+    // Deliberately keyed on environment/isConfigured(), the same test used
+    // at creation time - NOT on whether entra_object_id happens to be set
+    // right now. It's briefly NULL after the delete-secret route runs, or
+    // after a previous rotation attempt failed with the pool exhausted;
+    // either way this is still a sandbox application that belongs on the
+    // pool; checking entra_object_id here would wrongly and silently fall
+    // it back to a self-issued key forever once that happens.
     let keyId, rawKey;
-    if (application.entra_object_id) {
-      const password = await entra.addPassword(application.entra_object_id);
-      ({ id: keyId } = await issueApiKey(application.id, password.secretText, password.keyId));
-      rawKey = password.secretText;
+    if (application.environment === 'sandbox' && entraPool.isConfigured()) {
+      if (application.entra_object_id) {
+        await entraPool.release(application.id);
+      }
+      // The old row is now released (needs_rotation) regardless of what
+      // happens next - if the pool is exhausted, this application is left
+      // with no working secret until it's topped up and this is retried,
+      // rather than silently keeping the old (already-disclosed) one live.
+      let registration;
+      try {
+        registration = await entraPool.allocate(application.id, application.environment);
+      } catch (err) {
+        console.error('Entra pool re-allocation error:', err);
+        await pool.query('UPDATE applications SET entra_app_id = NULL, entra_object_id = NULL WHERE id = $1', [application.id]);
+        return res.status(502).json({
+          error: 'Could not allocate a new secret right now. Please try again shortly.',
+        });
+      }
+      await pool.query(
+        'UPDATE applications SET entra_app_id = $2, entra_object_id = $3 WHERE id = $1',
+        [application.id, registration.appId, registration.objectId]
+      );
+      ({ id: keyId } = await issueApiKey(application.id, registration.secretText, null));
+      rawKey = registration.secretText;
     } else {
       ({ id: keyId, rawKey } = await issueApiKey(application.id));
     }
@@ -514,12 +562,16 @@ app.delete('/api/applications/:id/api-keys/:keyId', requireAuth, async (req, res
       [req.params.keyId, application.id]
     );
 
-    // A real Entra secret must actually be removed from the app
-    // registration - marking our own row revoked_at is not enough on its
-    // own, or the credential would keep working against a real token
-    // request even though our UI shows it as deleted.
-    if (existing.rows[0] && existing.rows[0].entra_key_id) {
-      await entra.removePassword(application.entra_object_id, existing.rows[0].entra_key_id);
+    // A pool-backed secret must actually stop working, not just show as
+    // deleted in our UI - releasing the pool row is what does that: the
+    // Client Secret Terraform generated for this row is still the same
+    // secret value, but this application no longer has any record pointing
+    // at it, and the row goes back into the pool for a future application
+    // to be allocated instead. (The consumer is left with zero working
+    // secrets until they generate another - matching HMRC's own UX.)
+    if (existing.rows[0] && application.entra_object_id) {
+      await entraPool.release(application.id);
+      await pool.query('UPDATE applications SET entra_app_id = NULL, entra_object_id = NULL WHERE id = $1', [application.id]);
     }
 
     await pool.query(
