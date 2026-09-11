@@ -24,7 +24,7 @@ module "postgresql" {
     azurerm.postgres_network = azurerm.postgres_network
   }
 
-  source = "git@github.com:hmcts/terraform-module-postgresql-flexible?ref=master"
+  source = "git@github.com:hmcts/terraform-module-postgresql-flexible?ref=DTSPO-30107-additional-postgres-admins"
   env    = var.env
 
   product       = var.product
@@ -40,7 +40,8 @@ module "postgresql" {
   pgsql_version = var.pgsql_version
   create_mode   = var.pgsql_create_mode
 
-  admin_user_object_id = var.jenkins_AAD_objectId
+  admin_user_object_id          = var.jenkins_AAD_objectId
+  preserve_legacy_jenkins_admin = false
 
   common_tags = var.common_tags
 }
