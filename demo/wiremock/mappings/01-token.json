@@ -1,0 +1,6 @@
+{
+  "name": "Sign-in endpoint: a client-credentials token for Azure Resource Manager",
+  "request": { "method": "POST", "urlPathPattern": "/[^/]+/oauth2/v2.0/token" },
+  "response": { "status": 200, "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "token_type": "Bearer", "expires_in": 3600, "access_token": "demo-access-token" } }
+}

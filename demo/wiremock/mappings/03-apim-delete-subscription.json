@@ -1,0 +1,6 @@
+{
+  "name": "Azure Resource Manager: delete an APIM subscription",
+  "request": { "method": "DELETE",
+    "urlPathPattern": "/arm/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft.ApiManagement/service/[^/]+/subscriptions/[^/]+" },
+  "response": { "status": 200 }
+}

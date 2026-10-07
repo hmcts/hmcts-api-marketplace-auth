@@ -19,7 +19,8 @@ const pool = new Pool({
   // Flexible Server infrastructure/ provisions also requires SSL
   // (sslmode=require is baked into the DATABASE-URL Terraform writes), so
   // this setting is correct for both.
-  ssl: { rejectUnauthorized: false },
+  // Only ever turned off for a Postgres on your own machine (DATABASE_SSL=false), which has none.
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
 });
 
 async function initDb() {
@@ -141,6 +142,22 @@ async function initDb() {
   // several. Null for anything that isn't a real Entra-backed secret.
   await pool.query(`
     ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS entra_key_id TEXT;
+  `);
+
+  // The Azure API Management Subscription Key issued for each API an application is connected to (see
+  // src/apim.js). One per (application, API). subscription_name is APIM's name for it, which is what deleting it
+  // there needs. Empty unless the APIM credential is configured.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_subscriptions (
+      id SERIAL PRIMARY KEY,
+      application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+      api_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      subscription_name TEXT NOT NULL,
+      subscription_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (application_id, api_id)
+    );
   `);
 
   // Pre-provisioned Entra app registrations - created in bulk by the

@@ -32,6 +32,77 @@ required for testing. For real production use with more than one server
 instance, you'd want to swap this for a hosted database (e.g. Postgres) —
 ask if you'd like help with that step later.
 
+## Entra and APIM registration
+
+This is where an application gets its credentials. There are two independent grants, and each can happen
+without the other:
+
+| Credential | From | When |
+|---|---|---|
+| **Client ID and Client Secret** | Microsoft Entra External ID: an app registration from a **pre-provisioned pool** (`src/entraPool.js`) | When a sandbox application is created |
+| **Subscription Key**, one per API | Azure API Management: a subscription on that API's **Product** (`src/apim.js`) | When an API is connected to the application |
+
+```mermaid
+sequenceDiagram
+    participant U as Developer
+    participant A as This server
+    participant K as Key Vault (kvspsextidsbox)
+    participant M as Azure API Management
+    U->>A: create application (sandbox)
+    A->>A: allocate a free pool row (entra_app_pool)
+    A->>K: read that app's client secret
+    A-->>U: Client ID + Client Secret (shown once, never stored)
+    U->>A: connect an API
+    A->>M: PUT subscription scoped to the API's Product
+    M-->>A: Subscription Key
+    A->>A: store key + subscription name (api_subscriptions)
+    A-->>U: API connected; key shown on the application page
+    U->>A: disconnect the API / delete the application
+    A->>M: DELETE the subscription(s) first
+    A->>A: then forget them (and free the pool row)
+```
+
+**The order is always the same:** refuse what can be refused, ask Azure, write the database last. A failure
+after something was issued undoes it, and undoing never throws, so it cannot hide the failure being handled.
+Taking a key away deletes it in APIM *before* the row that remembers it: if APIM refuses, the key is still
+shown and the action can be tried again. Deleting something already gone is not a failure.
+
+**APIM is off until it is configured.** With `APIM_CLIENT_ID` and `APIM_CLIENT_SECRET` unset, connecting an API
+works as it always did and simply issues no key. There is deliberately no mock key.
+
+| Setting | What it is | State |
+|---|---|---|
+| `APIM-CLIENT-ID` / `APIM-CLIENT-SECRET` | A service principal that can manage subscriptions on the APIM instance | **Does not exist yet** (needs CloudOps) |
+| `APIM-PRODUCT-MAP` | `api-id:product-id,...`: which APIM Product backs which API | Not decided |
+| `APIM_TENANT_ID`, `APIM_SUBSCRIPTION_ID`, `APIM_RESOURCE_GROUP`, `APIM_SERVICE_NAME` | The shared sandbox instance; defaults are its real values | Default is fine |
+| `APIM_ARM_BASE_URL`, `APIM_LOGIN_BASE_URL` | Where Microsoft is. **Only for a demo or a test**; leave unset everywhere real | Unset |
+| `ENTRA-KEYVAULT-*` | How the pool's secrets are read (existing) | See below |
+
+**Entra needs the pool to exist.** The pool apps are created by `hmcts/external-entra-id`
+(`tenants/sbox/config/apps.yaml`), not by this server. **That file has no pool entries yet**, and this server's
+identity has not been given read access to their secrets, so Entra registration cannot work in sandbox until both
+are done. APIM keys do not depend on it.
+
+### Try it without Microsoft
+
+```bash
+./demo/run-demo.sh        # Postgres + a stand-in for APIM in Docker; walks the whole journey; offline
+./demo/run-demo.sh --down
+```
+
+It starts the server against a local Postgres and a WireMock stand-in for Azure, creates an account and an
+application, connects an API (a key comes back and shows on the application page), tries an API with no Product,
+disconnects, deletes, and prints every call the server made to "APIM". `npm test` runs the unit tests (no
+database or network needed).
+
+### What has and has not been shown
+
+- **Shown:** the routes, the SQL and the ordering, against a real Postgres and the stand-in; 25 unit tests.
+- **Shown for real, but not from this repo:** the same Azure calls (create, return the key, delete) were run
+  against the real sandbox APIM from the Java service, `hmcts/service-api-marketplace`.
+- **Not shown:** this server issuing a key from the real APIM. It needs the service principal above.
+- **Not shown:** the Entra pool in sandbox (see above).
+
 ## Running it locally
 
 You'll need [Node.js](https://nodejs.org) installed (version 18 or later).
