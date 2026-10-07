@@ -11,6 +11,10 @@ const nodemailer = require('nodemailer');
 const { getSecret } = require('./secrets');
 const { pool, initDb } = require('./db');
 const entraPool = require('./entraPool');
+const apim = require('./apim');
+const { createSubscriptions, HttpError } = require('./subscriptions');
+
+const subscriptions = createSubscriptions({ db: pool, apim });
 
 const app = express();
 
@@ -428,6 +432,8 @@ app.get('/api/applications/:id', requireAuth, async (req, res) => {
         createdAt: k.created_at,
         revokedAt: k.revoked_at,
       })),
+      // The APIM Subscription Key for each connected API. Empty unless the APIM credential is configured.
+      apiSubscriptions: await subscriptions.listFor(application.id),
     });
   } catch (err) {
     console.error('Get application error:', err);
@@ -480,6 +486,10 @@ app.delete('/api/applications/:id', requireAuth, async (req, res) => {
     // the next application, while this application's owner still knows its
     // Client Secret. release() flags it needs_rotation as well as clearing
     // the assignment, closing that gap.
+    // Before anything else is released or deleted: if APIM refuses, the application is left exactly as it was
+    // and can be deleted again, rather than losing the record of keys that are still live.
+    await subscriptions.revokeAll(application);
+
     if (application.entra_object_id) {
       await entraPool.release(application.id);
     }
@@ -491,6 +501,7 @@ app.delete('/api/applications/:id', requireAuth, async (req, res) => {
 
     res.status(204).end();
   } catch (err) {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
     console.error('Delete application error:', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
@@ -596,17 +607,10 @@ app.post('/api/applications/:id/connected-apis', requireAuth, async (req, res) =
       return res.status(400).json({ error: 'API id and name are required.' });
     }
 
-    const current = application.connected_apis || [];
-    if (current.some((a) => a.id === apiId)) {
-      return res.status(409).json({ error: 'That API is already connected.' });
-    }
-
-    const updated = await pool.query(
-      `UPDATE applications SET connected_apis = $2 WHERE id = $1 RETURNING *`,
-      [application.id, JSON.stringify([...current, { id: apiId, name: apiName }])]
-    );
-    res.status(201).json({ application: toPublicApplication(updated.rows[0]) });
+    const updated = await subscriptions.connect(application, apiId, apiName);
+    res.status(201).json({ application: toPublicApplication(updated) });
   } catch (err) {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
     console.error('Connect API error:', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
@@ -617,12 +621,10 @@ app.delete('/api/applications/:id/connected-apis/:apiId', requireAuth, async (re
     const application = await loadAccessibleApplication(req, res, 'developer');
     if (!application) return;
 
-    const updated = await pool.query(
-      `UPDATE applications SET connected_apis = $2 WHERE id = $1 RETURNING *`,
-      [application.id, JSON.stringify((application.connected_apis || []).filter((a) => a.id !== req.params.apiId))]
-    );
-    res.json({ application: toPublicApplication(updated.rows[0]) });
+    const updated = await subscriptions.disconnect(application, req.params.apiId);
+    res.json({ application: toPublicApplication(updated) });
   } catch (err) {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
     console.error('Disconnect API error:', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }

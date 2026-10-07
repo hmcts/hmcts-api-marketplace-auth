@@ -27,6 +27,11 @@ nodejs:
   #        - ENTRA-TENANT-ID
   #        - ENTRA-CLIENT-ID
   #        - ENTRA-CLIENT-SECRET
+  #        # Azure API Management Subscription Keys (src/apim.js). Leave these out until CloudOps have created the
+  #        # service principal: with them unset, connecting an API simply issues no key.
+  #        - APIM-CLIENT-ID
+  #        - APIM-CLIENT-SECRET
+  #        - APIM-PRODUCT-MAP
 
   readinessPath: /api/health
   livenessPath: /api/health
